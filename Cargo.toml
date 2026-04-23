@@ -3,7 +3,7 @@ name = "blink"
 version = "0.1.0"
 edition = "2021"
 description = "Background screen recording daemon with crash-resilient MKV output"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 rust-version = "1.75"
 
 [dependencies]
