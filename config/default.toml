@@ -1,0 +1,32 @@
+# blink — background screen recording daemon
+# Default configuration. Copy into ~/.config/blink/config.toml and edit.
+
+[capture]
+# Seconds between screenshots. 60 = one frame per minute.
+interval_seconds = 60
+# "all" captures every connected monitor side-by-side.
+# "primary" captures only the primary monitor.
+monitors = "all"
+
+[video]
+# Codec: "h264" | "h265" | "av1". h264 is the safest for playback compatibility.
+codec = "h264"
+# Constant Rate Factor. Lower = better quality, larger file. 18–28 is typical.
+crf = 28
+# Roll over to a new segment file after this many minutes.
+segment_minutes = 60
+
+[staging]
+# JPEG quality 1–100. Screenshots sit here briefly before being encoded.
+jpeg_quality = 85
+# Set true to keep JPEGs after encoding (useful for the future OCR/journal feature).
+keep_after_encode = false
+
+[output]
+# When dir is empty, defaults to ~/Videos/blink
+dir = ""
+
+[daemon]
+# When empty, defaults to ~/.cache/blink/blink.{pid,log}
+pid_file = ""
+log_file = ""

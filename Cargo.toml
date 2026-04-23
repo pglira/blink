@@ -1,0 +1,31 @@
+[package]
+name = "blink"
+version = "0.1.0"
+edition = "2021"
+description = "Background screen recording daemon with crash-resilient MKV output"
+license = "MIT OR Apache-2.0"
+rust-version = "1.75"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+crossbeam-channel = "0.5"
+ctrlc = { version = "3", features = ["termination"] }
+directories = "5"
+ffmpeg-next = "6.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+xcap = "0.0.14"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+libappindicator = "0.9"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
