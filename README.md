@@ -142,4 +142,4 @@ log_file = ""              # (reserved; current build logs to stderr)
 
 ## Licence
 
-MIT or Apache-2.0, at your option.
+MIT
