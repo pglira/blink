@@ -13,6 +13,10 @@ mod state;
 mod tray;
 
 fn main() -> Result<()> {
+    // Writes to a broken peer (e.g. the tray DBus socket going away) must
+    // surface as EPIPE, not a process-killing signal. Default daemon hygiene.
+    unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
+
     init_tracing();
 
     let sub = std::env::args().nth(1).unwrap_or_else(|| "run".into());
