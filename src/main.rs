@@ -8,6 +8,7 @@ use tracing_subscriber::EnvFilter;
 mod capture;
 mod config;
 mod encoder;
+mod service;
 mod staging;
 mod state;
 mod tray;
@@ -16,6 +17,9 @@ fn main() -> Result<()> {
     // Writes to a broken peer (e.g. the tray DBus socket going away) must
     // surface as EPIPE, not a process-killing signal. Default daemon hygiene.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_IGN); }
+    // Closing the launching terminal sends SIGHUP to its children; a daemon
+    // should keep running across that.
+    unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN); }
 
     init_tracing();
 
@@ -26,6 +30,8 @@ fn main() -> Result<()> {
             println!("{}", config::config_path()?.display());
             Ok(())
         }
+        "install-service" => service::install(),
+        "uninstall-service" => service::uninstall(),
         "-h" | "--help" | "help" => {
             print_help();
             Ok(())
@@ -38,9 +44,11 @@ fn print_help() {
     println!("blink — background screen recording daemon");
     println!();
     println!("USAGE:");
-    println!("  blink [run]          Start the daemon (default)");
-    println!("  blink config-path    Print the path of config.toml");
-    println!("  blink help           Show this help");
+    println!("  blink [run]             Start the daemon (default)");
+    println!("  blink config-path       Print the path of config.toml");
+    println!("  blink install-service   Install & start a systemd user service");
+    println!("  blink uninstall-service Stop & remove the systemd user service");
+    println!("  blink help              Show this help");
     println!();
     println!("On first start a default config is written to ~/.config/blink/config.toml.");
 }

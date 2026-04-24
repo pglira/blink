@@ -58,10 +58,32 @@ The binary is `target/release/blink` (~4 MB stripped).
 ## Run
 
 ```
-blink                # start the daemon (same as `blink run`)
-blink config-path    # print path to config.toml
+blink                    # start the daemon (same as `blink run`)
+blink config-path        # print path to config.toml
+blink install-service    # install & start a systemd user service
+blink uninstall-service  # stop & remove the systemd user service
 blink help
 ```
+
+### Running under systemd (recommended)
+
+`blink &` from a terminal emulator dies when the terminal window closes,
+because modern terminals (VTE-based ones like gnome-terminal and
+xfce4-terminal, plus Konsole) register each shell in a transient systemd
+user scope and tear it down — SIGTERM'ing everything in the cgroup — when
+the window goes away. Ignoring SIGHUP does not help.
+
+The fix is to run blink as a systemd **user** service, which lives in its
+own unit and is independent of any terminal:
+
+```
+blink install-service
+```
+
+That writes `~/.config/systemd/user/blink.service` pointing at the current
+binary, then runs `systemctl --user daemon-reload` and
+`systemctl --user enable --now blink.service`. The daemon will start
+automatically on login from then on. `blink uninstall-service` reverses it.
 
 First run writes a default config to `~/.config/blink/config.toml`.
 Default paths:
@@ -122,10 +144,12 @@ log_file = ""              # (reserved; current build logs to stderr)
 .
 ├── .devcontainer/          VS Code devcontainer (Rust + libav + GTK + X11)
 ├── config/default.toml     Embedded default config, written on first run
+├── config/blink.service    Embedded systemd user unit template
 ├── Cargo.toml
 └── src/
     ├── main.rs             CLI, thread orchestration, signal handling
     ├── config.rs           TOML loader, XDG path resolution
+    ├── service.rs          systemd --user install/uninstall
     ├── state.rs            Shared AtomicBool flags + PID file guard
     ├── staging.rs          Atomic JPEG writes + pending_frames scan
     ├── capture.rs          xcap screenshot loop, monitor composite
