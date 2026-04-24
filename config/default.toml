@@ -15,6 +15,10 @@ codec = "h264"
 crf = 28
 # Roll over to a new segment file after this many minutes.
 segment_minutes = 60
+# Playback frame rate of the encoded video. Tune together with
+# capture.interval_seconds: each captured frame shows for 1/fps seconds,
+# so fps=2 with interval_seconds=60 yields a 120× timelapse.
+fps = 2
 
 [staging]
 # JPEG quality 1–100. Screenshots sit here briefly before being encoded.

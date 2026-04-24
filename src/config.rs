@@ -29,6 +29,9 @@ pub struct VideoConfig {
     pub codec: String,
     pub crf: u8,
     pub segment_minutes: u64,
+    /// Playback frame rate. With the default 60s capture interval, fps=2
+    /// plays back 30 captured seconds per video second (120× speedup).
+    pub fps: u32,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

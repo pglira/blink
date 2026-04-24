@@ -24,6 +24,10 @@ struct Segment {
     height: u32,
     pts: i64,
     opened_at: Instant,
+    // Encoder emits packet ts in 1/fps ticks, but MKV's muxer snaps the
+    // stream time_base to milliseconds. We rescale on the way out.
+    enc_tb: ff::Rational,
+    stream_tb: ff::Rational,
 }
 
 impl Segment {
@@ -81,8 +85,6 @@ impl Segment {
 
         let mut opts = ff::Dictionary::new();
         opts.set("crf", &cfg.video.crf.to_string());
-        // `medium` preset: modest CPU, decent compression. Screens at 1 fps
-        // are trivially cheap regardless.
         opts.set("preset", "medium");
 
         let opened = enc
@@ -99,6 +101,15 @@ impl Segment {
         mux_opts.set("flush_packets", "1");
         octx.write_header_with(mux_opts)
             .context("writing MKV header")?;
+
+        // write_header_with may renegotiate the stream's time_base (MKV
+        // prefers ms precision). Capture the final value after the header
+        // is written so rescale_ts targets the right denominator.
+        let stream_tb = octx
+            .stream(0)
+            .ok_or_else(|| anyhow!("output has no stream 0"))?
+            .time_base();
+        let enc_tb = ff::Rational::new(1, fps);
 
         let scaler = ff::software::scaling::Context::get(
             ff::format::Pixel::RGB24, w, h,
@@ -123,6 +134,8 @@ impl Segment {
             height: h,
             pts: 0,
             opened_at: Instant::now(),
+            enc_tb,
+            stream_tb,
         })
     }
 
@@ -166,6 +179,7 @@ impl Segment {
         let mut pkt = ff::packet::Packet::empty();
         while self.encoder.receive_packet(&mut pkt).is_ok() {
             pkt.set_stream(0);
+            pkt.rescale_ts(self.enc_tb, self.stream_tb);
             pkt.write_interleaved(&mut self.octx)?;
         }
         Ok(())
@@ -212,7 +226,7 @@ pub fn run(cfg: Config, state: Arc<AppState>, rx: Receiver<Signal>) -> Result<()
     let segment_cap = Duration::from_secs(
         cfg.video.segment_minutes.saturating_mul(60).max(60),
     );
-    let fps: i32 = 1; // at a 1-minute cadence we clamp the video track to 1 fps
+    let fps: i32 = cfg.video.fps.max(1) as i32;
 
     let mut current: Option<Segment> = None;
 
@@ -307,7 +321,7 @@ fn recover(cfg: &Config, staging_dir: &Path, output_dir: &Path) -> Result<()> {
     }
     info!(count = frames.len(), "recovering orphan frames");
 
-    let fps: i32 = 1;
+    let fps: i32 = cfg.video.fps.max(1) as i32;
     let mut seg: Option<Segment> = None;
 
     for fp in frames {
