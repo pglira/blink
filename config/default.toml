@@ -19,6 +19,8 @@ segment_minutes = 60
 # capture.interval_seconds: each captured frame shows for 1/fps seconds,
 # so fps=2 with interval_seconds=60 yields a 120× timelapse.
 fps = 2
+# Start a new segment at local midnight so each MKV covers one calendar day.
+daily_split = true
 
 [staging]
 # JPEG quality 1–100. Screenshots sit here briefly before being encoded.

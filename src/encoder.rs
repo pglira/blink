@@ -24,6 +24,7 @@ struct Segment {
     height: u32,
     pts: i64,
     opened_at: Instant,
+    opened_day: chrono::NaiveDate,
     // Encoder emits packet ts in 1/fps ticks, but MKV's muxer snaps the
     // stream time_base to milliseconds. We rescale on the way out.
     enc_tb: ff::Rational,
@@ -134,6 +135,7 @@ impl Segment {
             height: h,
             pts: 0,
             opened_at: Instant::now(),
+            opened_day: chrono::Local::now().date_naive(),
             enc_tb,
             stream_tb,
         })
@@ -285,7 +287,11 @@ fn handle_frame(
     let need_rotate = match current.as_ref() {
         None => true,
         Some(seg) => {
-            seg.width != w || seg.height != h || seg.opened_at.elapsed() >= segment_cap
+            seg.width != w
+                || seg.height != h
+                || seg.opened_at.elapsed() >= segment_cap
+                || (cfg.video.daily_split
+                    && chrono::Local::now().date_naive() != seg.opened_day)
         }
     };
 

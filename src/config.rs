@@ -32,7 +32,13 @@ pub struct VideoConfig {
     /// Playback frame rate. With the default 60s capture interval, fps=2
     /// plays back 30 captured seconds per video second (120× speedup).
     pub fps: u32,
+    /// If true, start a new segment at local midnight so each MKV covers a
+    /// single calendar day.
+    #[serde(default = "default_true")]
+    pub daily_split: bool,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct StagingConfig {

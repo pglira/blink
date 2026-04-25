@@ -8,7 +8,6 @@ use tracing_subscriber::EnvFilter;
 mod capture;
 mod config;
 mod encoder;
-mod service;
 mod staging;
 mod state;
 mod tray;
@@ -30,8 +29,6 @@ fn main() -> Result<()> {
             println!("{}", config::config_path()?.display());
             Ok(())
         }
-        "install-service" => service::install(),
-        "uninstall-service" => service::uninstall(),
         "-h" | "--help" | "help" => {
             print_help();
             Ok(())
@@ -44,11 +41,9 @@ fn print_help() {
     println!("blink — background screen recording daemon");
     println!();
     println!("USAGE:");
-    println!("  blink [run]             Start the daemon (default)");
-    println!("  blink config-path       Print the path of config.toml");
-    println!("  blink install-service   Install & start a systemd user service");
-    println!("  blink uninstall-service Stop & remove the systemd user service");
-    println!("  blink help              Show this help");
+    println!("  blink [run]       Start the daemon (default)");
+    println!("  blink config-path Print the path of config.toml");
+    println!("  blink help        Show this help");
     println!();
     println!("On first start a default config is written to ~/.config/blink/config.toml.");
 }

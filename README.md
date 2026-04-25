@@ -12,13 +12,14 @@ of the way — visible only as a tray icon.
 - Continuous H.264 encoding into MKV segments via linked `libav` (no
   `ffmpeg` subprocess). MKV is chosen because truncated files remain playable.
 - Automatic segment rotation when the monitor layout changes (resolution or
-  connect/disconnect of a display) or when `segment_minutes` elapses.
+  connect/disconnect of a display), when `segment_minutes` elapses, or at
+  local midnight (so each MKV covers a single calendar day by default).
 - Crash resilience: staged JPEGs are only deleted once the corresponding
   frame is flushed and fsynced; MKV muxer runs with `flush_packets=1`.
   Any orphan JPEGs from a prior run are drained into `recovery_*.mkv` at
   startup.
 - System tray icon with Pause / Resume / Quit. Icon shows current status
-  (blue disc with dot = recording, gray disc with pause bars = paused).
+  (blue open eye = recording, gray closed eye = paused).
 - Single TOML config at `~/.config/blink/config.toml` (written on first run).
 
 ## Build
@@ -58,32 +59,23 @@ The binary is `target/release/blink` (~4 MB stripped).
 ## Run
 
 ```
-blink                    # start the daemon (same as `blink run`)
-blink config-path        # print path to config.toml
-blink install-service    # install & start a systemd user service
-blink uninstall-service  # stop & remove the systemd user service
+blink              # start the daemon (same as `blink run`)
+blink config-path  # print path to config.toml
 blink help
 ```
 
-### Running under systemd (recommended)
+Start blink once and leave it sitting in the tray; pause/resume from there.
 
-`blink &` from a terminal emulator dies when the terminal window closes,
-because modern terminals (VTE-based ones like gnome-terminal and
-xfce4-terminal, plus Konsole) register each shell in a transient systemd
-user scope and tear it down — SIGTERM'ing everything in the cgroup — when
-the window goes away. Ignoring SIGHUP does not help.
-
-The fix is to run blink as a systemd **user** service, which lives in its
-own unit and is independent of any terminal:
+To launch it automatically on login, drop the bundled desktop entry into the
+XDG autostart directory:
 
 ```
-blink install-service
+install -Dm644 config/blink.desktop ~/.config/autostart/blink.desktop
 ```
 
-That writes `~/.config/systemd/user/blink.service` pointing at the current
-binary, then runs `systemctl --user daemon-reload` and
-`systemctl --user enable --now blink.service`. The daemon will start
-automatically on login from then on. `blink uninstall-service` reverses it.
+The session manager (GNOME, KDE, XFCE, …) will then start blink as part of
+your graphical session — independent of any terminal — and it will reappear
+in the tray after every login.
 
 First run writes a default config to `~/.config/blink/config.toml`.
 Default paths:
@@ -116,6 +108,7 @@ monitors = "all"           # "all" | "primary"
 codec = "h264"             # h264 | h265 | av1
 crf = 28                   # lower = higher quality, larger files
 segment_minutes = 60       # roll over to a new MKV every hour
+daily_split = true         # also roll over at local midnight (one MKV per day)
 
 [staging]
 jpeg_quality = 85
@@ -144,12 +137,11 @@ log_file = ""              # (reserved; current build logs to stderr)
 .
 ├── .devcontainer/          VS Code devcontainer (Rust + libav + GTK + X11)
 ├── config/default.toml     Embedded default config, written on first run
-├── config/blink.service    Embedded systemd user unit template
+├── config/blink.desktop    XDG autostart entry (copy to ~/.config/autostart/)
 ├── Cargo.toml
 └── src/
     ├── main.rs             CLI, thread orchestration, signal handling
     ├── config.rs           TOML loader, XDG path resolution
-    ├── service.rs          systemd --user install/uninstall
     ├── state.rs            Shared AtomicBool flags + PID file guard
     ├── staging.rs          Atomic JPEG writes + pending_frames scan
     ├── capture.rs          xcap screenshot loop, monitor composite

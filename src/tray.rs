@@ -114,33 +114,45 @@ fn write_icons() -> Result<PathBuf> {
     let dir = std::env::temp_dir().join(format!("blink-{}", std::process::id()));
     fs::create_dir_all(&dir).context("creating tray icon dir")?;
 
-    // Recording: white dot inside a blue disc.
+    // The almond "eye" shape is the intersection of two circles, each of
+    // radius R centred h pixels above/below the canvas centre. At 32×32 with
+    // h=8, R=13, the almond spans ~20×10 px — classic eye proportions.
+    const H: f32 = 8.0;
+    const R_SQ: f32 = 13.0 * 13.0;
+
+    // Recording: open eye — filled blue almond with a white pupil.
     draw_icon(&dir.join(format!("{ICON_REC}.png")), SIZE, |x, y, cx, cy| {
-        let d = dist(x, y, cx, cy);
-        if d <= 5.0 {
-            Some(Rgba([255, 255, 255, 255]))
-        } else if d <= 14.0 {
-            Some(Rgba([60, 130, 220, 255]))
+        let dx = x as f32 + 0.5 - cx;
+        let dy = y as f32 + 0.5 - cy;
+        if dx * dx + dy * dy <= 3.0 * 3.0 {
+            return Some(Rgba([255, 255, 255, 255]));
+        }
+        let d1_sq = dx * dx + (dy - H) * (dy - H);
+        let d2_sq = dx * dx + (dy + H) * (dy + H);
+        if d1_sq <= R_SQ && d2_sq <= R_SQ {
+            return Some(Rgba([60, 130, 220, 255]));
+        }
+        None
+    })?;
+
+    // Paused: closed eye — a flat horizontal pill, the same 20 px width as
+    // the open almond but squashed to 4 px tall, reading as "shut tight".
+    draw_icon(&dir.join(format!("{ICON_PAUSED}.png")), SIZE, |x, y, cx, cy| {
+        const HALF_W: f32 = 8.0;
+        const HALF_H: f32 = 2.0;
+        let dx = x as f32 + 0.5 - cx;
+        let dy = y as f32 + 0.5 - cy;
+        let in_pill = if dx.abs() <= HALF_W {
+            dy.abs() <= HALF_H
+        } else {
+            let ex = dx.abs() - HALF_W;
+            ex * ex + dy * dy <= HALF_H * HALF_H
+        };
+        if in_pill {
+            Some(Rgba([140, 140, 140, 255]))
         } else {
             None
         }
-    })?;
-
-    // Paused: two white vertical bars inside a muted gray disc.
-    draw_icon(&dir.join(format!("{ICON_PAUSED}.png")), SIZE, |x, y, cx, cy| {
-        let d = dist(x, y, cx, cy);
-        if d > 14.0 {
-            return None;
-        }
-        let dx = x as f32 + 0.5 - cx;
-        let dy = y as f32 + 0.5 - cy;
-        // Two vertical bars, ~3px wide, centred at ±3.5px from centre, height ±6.
-        let in_bar = (dx.abs() > 2.0 && dx.abs() < 5.0) && dy.abs() < 6.0;
-        Some(if in_bar {
-            Rgba([255, 255, 255, 255])
-        } else {
-            Rgba([140, 140, 140, 255])
-        })
     })?;
 
     Ok(dir)
@@ -161,9 +173,3 @@ fn draw_icon(
     Ok(())
 }
 
-#[inline]
-fn dist(x: u32, y: u32, cx: f32, cy: f32) -> f32 {
-    let dx = x as f32 + 0.5 - cx;
-    let dy = y as f32 + 0.5 - cy;
-    (dx * dx + dy * dy).sqrt()
-}
