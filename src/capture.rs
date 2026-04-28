@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use image::{
     codecs::png::{CompressionType, FilterType, PngEncoder},
     ExtendedColorType, ImageEncoder, RgbImage,
@@ -131,7 +131,15 @@ fn encode_png(img: &RgbImage) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Write `<output_dir>/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png` atomically.
+/// Write `<output_dir>/YYYY/MM/YYYY_MM_DDTHHMMSSZ.png` atomically.
+///
+/// The directory uses the *local* year/month at capture, so the on-disk
+/// layout matches the calendar day a user would associate with the shot.
+/// The filename uses *UTC* in compact ISO 8601 form (with the trailing
+/// `Z`), which makes it globally unique even if the capturing machine's
+/// timezone changes mid-day — without that, two shots taken at the same
+/// local wall-clock time but in different timezones would collide and
+/// the second write would clobber the first.
 fn write_screenshot(
     output_dir: &Path,
     captured_at: &DateTime<Local>,
@@ -142,7 +150,10 @@ fn write_screenshot(
         .join(captured_at.format("%m").to_string());
     fs::create_dir_all(&dir)?;
 
-    let stem = captured_at.format("%Y_%m_%d_%H_%M_%S").to_string();
+    let stem = captured_at
+        .with_timezone(&Utc)
+        .format("%Y_%m_%dT%H%M%SZ")
+        .to_string();
     let final_path = dir.join(format!("{stem}.png"));
     let tmp_path = dir.join(format!("{stem}.png.tmp"));
 
