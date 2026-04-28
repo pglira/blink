@@ -40,6 +40,11 @@ pub fn run(cfg: Config) -> Result<()> {
         options,
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
+            // xfwm4 (and some other X11 WMs) ignore the initial-maximized
+            // ICCCM hint from `ViewportBuilder::with_maximized`, so re-issue
+            // the request as a viewport command once the window is mapped.
+            cc.egui_ctx
+                .send_viewport_cmd(eframe::egui::ViewportCommand::Maximized(true));
             Ok(Box::new(app::ViewerApp::new(index)))
         }),
     )
