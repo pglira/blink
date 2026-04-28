@@ -38,7 +38,12 @@ pub fn run(cfg: Config, state: Arc<AppState>) -> Result<()> {
             match grab_composite(&cfg) {
                 Ok(Some(canvas)) => match encode_png(&canvas) {
                     Ok(bytes) => match write_screenshot(&output_dir, &bytes) {
-                        Ok(path) => debug!(path = %path.display(), bytes = bytes.len(), "screenshot saved"),
+                        Ok(path) => {
+                            debug!(path = %path.display(), bytes = bytes.len(), "screenshot saved");
+                            if let Err(e) = write_sidecar(&path, interval.as_secs()) {
+                                warn!("sidecar metadata write failed: {e:#}");
+                            }
+                        }
                         Err(e) => error!("writing screenshot failed: {e:#}"),
                     },
                     Err(e) => error!("PNG encode failed: {e:#}"),
@@ -141,4 +146,20 @@ fn write_screenshot(output_dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
     }
     fs::rename(&tmp_path, &final_path)?;
     Ok(final_path)
+}
+
+/// Write the per-screenshot metadata sidecar `<stem>.toml` next to the PNG.
+/// Atomic via `.tmp` + rename, like the PNG. Currently only `interval_seconds`;
+/// future metadata keys land here.
+fn write_sidecar(png_path: &Path, interval_seconds: u64) -> Result<()> {
+    let toml_path = png_path.with_extension("toml");
+    let tmp_path = toml_path.with_extension("toml.tmp");
+    let body = format!("interval_seconds = {interval_seconds}\n");
+    {
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(body.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp_path, &toml_path)?;
+    Ok(())
 }

@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use ksni::menu::StandardItem;
 use ksni::{Icon, MenuItem, ToolTip, Tray, TrayService};
 use tracing::info;
@@ -65,6 +65,16 @@ impl Tray for BlinkTray {
                 ..Default::default()
             }
             .into(),
+            StandardItem {
+                label: "Open Viewer".into(),
+                activate: Box::new(|_t: &mut Self| {
+                    if let Err(e) = spawn_viewer() {
+                        tracing::error!("could not launch viewer: {e:#}");
+                    }
+                }),
+                ..Default::default()
+            }
+            .into(),
             MenuItem::Separator,
             StandardItem {
                 label: "Quit".into(),
@@ -107,6 +117,18 @@ pub fn run(state: Arc<AppState>) -> Result<()> {
 
     handle.shutdown();
     info!("tray loop exiting");
+    Ok(())
+}
+
+/// Launch the viewer as a separate process so the daemon keeps capturing.
+/// Re-execs the current binary with the `view` subcommand.
+fn spawn_viewer() -> Result<()> {
+    let exe = std::env::current_exe().context("current_exe")?;
+    std::process::Command::new(exe)
+        .arg("view")
+        .spawn()
+        .context("spawning viewer")?;
+    info!("viewer launched from tray");
     Ok(())
 }
 

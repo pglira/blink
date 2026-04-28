@@ -8,6 +8,7 @@ mod capture;
 mod config;
 mod state;
 mod tray;
+mod viewer;
 
 fn main() -> Result<()> {
     // Writes to a broken peer (e.g. the tray DBus socket going away) must
@@ -22,6 +23,7 @@ fn main() -> Result<()> {
     let sub = std::env::args().nth(1).unwrap_or_else(|| "run".into());
     match sub.as_str() {
         "run" => run(),
+        "view" => viewer::run(config::Config::load().context("loading config")?),
         "config-path" => {
             println!("{}", config::config_path()?.display());
             Ok(())
@@ -39,6 +41,7 @@ fn print_help() {
     println!();
     println!("USAGE:");
     println!("  blink [run]       Start the daemon (default)");
+    println!("  blink view        Open the screenshot archive viewer GUI");
     println!("  blink config-path Print the path of config.toml");
     println!("  blink help        Show this help");
     println!();
