@@ -58,7 +58,9 @@ pub fn ui(
 
     painter.rect_filled(rect, 3.0, Color32::from_gray(28));
 
-    // Hour grid + labels.
+    // Hour grid + labels. Tick density adapts to width so labels never
+    // collide: ~50 px is enough for "HH:00".
+    let label_step = pick_label_step(rect.width());
     for h in 0..=24 {
         let x = rect.min.x + (h as f32 / 24.0) * rect.width();
         let major = h % 6 == 0;
@@ -73,7 +75,7 @@ pub fn ui(
                 },
             ),
         );
-        if major && h < 24 {
+        if h < 24 && h % label_step == 0 {
             painter.text(
                 Pos2::new(x + 3.0, rect.min.y + 1.0),
                 egui::Align2::LEFT_TOP,
@@ -159,6 +161,19 @@ pub fn ui(
             }
         }
     }
+}
+
+/// Pick the smallest "every N hours" label step (from {1, 2, 3, 6}) that
+/// keeps adjacent labels at least ~50 px apart, so they don't overlap.
+fn pick_label_step(width: f32) -> u32 {
+    const MIN_PX_PER_LABEL: f32 = 52.0;
+    let px_per_hour = width / 24.0;
+    for &step in &[1u32, 2, 3, 6] {
+        if px_per_hour * step as f32 >= MIN_PX_PER_LABEL {
+            return step;
+        }
+    }
+    6
 }
 
 fn time_frac(t: NaiveTime) -> f32 {
