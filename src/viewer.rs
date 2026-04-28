@@ -19,15 +19,23 @@ pub fn run(cfg: Config) -> Result<()> {
         "viewer index built"
     );
 
+    const ICON_SIZE: u32 = 128;
+    let icon = eframe::egui::IconData {
+        rgba: crate::icon::active(ICON_SIZE, crate::icon::ByteOrder::Rgba),
+        width: ICON_SIZE,
+        height: ICON_SIZE,
+    };
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("Blink — viewer")
+            .with_title("blink")
+            .with_app_id("blink")
+            .with_icon(icon)
             .with_inner_size([1280.0, 800.0]),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Blink — viewer",
+        "blink",
         options,
         Box::new(move |cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);

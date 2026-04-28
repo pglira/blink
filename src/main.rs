@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 mod capture;
 mod config;
+mod icon;
 mod state;
 mod tray;
 mod viewer;
