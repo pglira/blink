@@ -30,7 +30,8 @@ pub fn run(cfg: Config) -> Result<()> {
             .with_title("blink")
             .with_app_id("blink")
             .with_icon(icon)
-            .with_inner_size([1280.0, 800.0]),
+            .with_inner_size([1280.0, 800.0])
+            .with_maximized(true),
         ..Default::default()
     };
 
