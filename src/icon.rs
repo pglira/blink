@@ -1,83 +1,80 @@
-//! Procedural eye-icon rendering shared by the tray and the viewer window.
+//! Eye icons for the tray and the viewer window.
 //!
-//! The geometry is defined for a 32 px canvas and scaled linearly to whatever
-//! `size` the caller asks for; this keeps tray (32 px) and viewer-window
-//! (e.g. 128 px) icons visually identical.
+//! Sources are Lucide's `eye` and `eye-off` SVGs (ISC-licensed; see
+//! `assets/icons/LUCIDE_LICENSE`). They are rendered at runtime via `resvg`,
+//! so any caller-requested size renders crisply with proper anti-aliasing.
+
+use resvg::{tiny_skia, usvg};
 
 /// Per-pixel byte order of the returned buffer.
 pub enum ByteOrder {
     /// `[A, R, G, B]` per pixel — what ksni wants on the wire.
     Argb,
-    /// `[R, G, B, A]` per pixel — what eframe / egui `IconData` wants.
+    /// `[R, G, B, A]` per pixel, straight (non-premultiplied) alpha — what
+    /// eframe / egui `IconData` wants.
     Rgba,
 }
 
-/// Active icon: open blue eye with a white pupil.
+const EYE_SVG: &str = include_str!("../assets/icons/eye.svg");
+const EYE_OFF_SVG: &str = include_str!("../assets/icons/eye-off.svg");
+
+/// A vivid blue picked to read well on dark and light panels alike.
+const ACTIVE_STROKE: &str = "#4DA3FF";
+/// A muted neutral grey for the paused state.
+const PAUSED_STROKE: &str = "#9AA0A6";
+
 pub fn active(size: u32, order: ByteOrder) -> Vec<u8> {
-    let scale = size as f32 / 32.0;
-    let h = 8.0 * scale;
-    let r_sq = (13.0 * scale).powi(2);
-    let pupil_sq = (3.0 * scale).powi(2);
-    render(size, order, move |dx, dy| {
-        if dx * dx + dy * dy <= pupil_sq {
-            return Some([255, 255, 255, 255]);
-        }
-        let d1 = dx * dx + (dy - h) * (dy - h);
-        let d2 = dx * dx + (dy + h) * (dy + h);
-        if d1 <= r_sq && d2 <= r_sq {
-            Some([255, 60, 130, 220])
-        } else {
-            None
-        }
-    })
+    render(EYE_SVG, ACTIVE_STROKE, size, order)
 }
 
-/// Paused icon: a closed-eye horizontal pill.
 pub fn paused(size: u32, order: ByteOrder) -> Vec<u8> {
-    let scale = size as f32 / 32.0;
-    let half_w = 8.0 * scale;
-    let half_h = 2.0 * scale;
-    render(size, order, move |dx, dy| {
-        let in_pill = if dx.abs() <= half_w {
-            dy.abs() <= half_h
-        } else {
-            let ex = dx.abs() - half_w;
-            ex * ex + dy * dy <= half_h * half_h
-        };
-        if in_pill {
-            Some([255, 140, 140, 140])
-        } else {
-            None
-        }
-    })
+    render(EYE_OFF_SVG, PAUSED_STROKE, size, order)
 }
 
-fn render(
-    size: u32,
-    order: ByteOrder,
-    pixel: impl Fn(f32, f32) -> Option<[u8; 4]>,
-) -> Vec<u8> {
-    let n = size as usize;
-    let cx = size as f32 / 2.0;
-    let cy = size as f32 / 2.0;
-    let mut data = vec![0u8; n * n * 4];
-    for y in 0..n {
-        for x in 0..n {
-            let dx = x as f32 + 0.5 - cx;
-            let dy = y as f32 + 0.5 - cy;
-            // Pixel shaders above always return ARGB-style [A, R, G, B].
-            let argb = pixel(dx, dy).unwrap_or([0, 0, 0, 0]);
-            let i = (y * n + x) * 4;
-            match order {
-                ByteOrder::Argb => data[i..i + 4].copy_from_slice(&argb),
-                ByteOrder::Rgba => {
-                    data[i] = argb[1];
-                    data[i + 1] = argb[2];
-                    data[i + 2] = argb[3];
-                    data[i + 3] = argb[0];
-                }
-            }
-        }
+fn render(svg_src: &str, stroke: &str, size: u32, order: ByteOrder) -> Vec<u8> {
+    // Lucide ships the SVGs with `stroke="currentColor"`; bake in our colour
+    // before parsing so we don't need to walk the tree to recolour nodes.
+    let svg = svg_src.replace("currentColor", stroke);
+
+    let opt = usvg::Options::default();
+    let tree = usvg::Tree::from_str(&svg, &opt).expect("bundled SVG must parse");
+
+    let svg_size = tree.size();
+    let scale = (size as f32 / svg_size.width()).min(size as f32 / svg_size.height());
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+
+    let mut pixmap = tiny_skia::Pixmap::new(size, size).expect("non-zero pixmap size");
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    // tiny-skia stores premultiplied RGBA; both consumers want straight alpha.
+    let mut data = pixmap.take();
+    unpremultiply(&mut data);
+    match order {
+        ByteOrder::Rgba => data,
+        ByteOrder::Argb => rgba_to_argb_inplace(data),
     }
-    data
+}
+
+fn unpremultiply(rgba: &mut [u8]) {
+    for px in rgba.chunks_exact_mut(4) {
+        let a = px[3];
+        if a == 0 || a == 255 {
+            continue;
+        }
+        let inv = 255.0 / a as f32;
+        px[0] = ((px[0] as f32 * inv).round() as u32).min(255) as u8;
+        px[1] = ((px[1] as f32 * inv).round() as u32).min(255) as u8;
+        px[2] = ((px[2] as f32 * inv).round() as u32).min(255) as u8;
+    }
+}
+
+fn rgba_to_argb_inplace(mut rgba: Vec<u8>) -> Vec<u8> {
+    for px in rgba.chunks_exact_mut(4) {
+        let (r, g, b, a) = (px[0], px[1], px[2], px[3]);
+        px[0] = a;
+        px[1] = r;
+        px[2] = g;
+        px[3] = b;
+    }
+    rgba
 }
