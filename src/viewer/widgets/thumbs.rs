@@ -68,53 +68,70 @@ pub fn ui(
             // Bias by ±1 to cover items being scrolled into view.
             let first = (((viewport.min.x / item_w).floor() as i64) - 1)
                 .max(0) as usize;
-            let mut last = ((viewport.max.x / item_w).ceil() as usize + 1).min(n);
-            let mut first = first.min(n);
+            let last = ((viewport.max.x / item_w).ceil() as usize + 1).min(n);
+            let first = first.min(n);
 
-            // If the selection just changed and the selected thumb is outside
-            // the visible window, extend the rendered range to include it so
-            // we have a Response to call scroll_to_me on.
-            let selected_pos = selected_shot
-                .and_then(|sel| visible.iter().position(|(i, _)| *i == sel));
-            if needs_scroll {
-                if let Some(p) = selected_pos {
-                    first = first.min(p);
-                    last = last.max(p + 1);
-                }
+            // The viewport range. Always rendered.
+            for vi in first..last {
+                render_thumb(ui, &visible, vi, item_w, rect, selected_shot, needs_scroll);
             }
 
-            for vi in first..last {
-                let (i, shot) = visible[vi];
-                let x = rect.min.x + vi as f32 * item_w;
-                let thumb_rect = Rect::from_min_size(
-                    Pos2::new(x, rect.min.y),
-                    Vec2::new(THUMB_W, THUMB_H),
-                );
-                let uri = format!("file://{}", shot.png.display());
-                let img = egui::Image::new(uri)
-                    .fit_to_exact_size(Vec2::new(THUMB_W, THUMB_H))
-                    .sense(Sense::click());
-                let resp = ui.put(thumb_rect, img);
-
-                let selected = *selected_shot == Some(i);
-                if selected {
-                    ui.painter().rect_stroke(
-                        thumb_rect.shrink(1.5),
-                        3.0,
-                        Stroke::new(3.0, Color32::from_rgb(255, 220, 80)),
-                    );
-                    if needs_scroll {
-                        resp.scroll_to_me(Some(Align::Center));
+            // If the selection just changed and the selected thumb sits
+            // OUTSIDE the viewport range, render it on its own so we have a
+            // Response to call scroll_to_me on. Critically this stays
+            // disjoint from the viewport range — we never collapse the gap
+            // into a single contiguous range, which would re-introduce the
+            // "decode everything between viewport and selection" stall.
+            if needs_scroll {
+                let selected_pos = selected_shot
+                    .and_then(|sel| visible.iter().position(|(i, _)| *i == sel));
+                if let Some(p) = selected_pos {
+                    if p < first || p >= last {
+                        render_thumb(ui, &visible, p, item_w, rect, selected_shot, true);
                     }
-                }
-                let resp = resp.on_hover_text(format!("{}", shot.time.format("%H:%M:%S")));
-                if resp.clicked() {
-                    *selected_shot = Some(i);
                 }
             }
         });
 
     if needs_scroll {
         *last_focused = want_focus;
+    }
+}
+
+fn render_thumb(
+    ui: &mut Ui,
+    visible: &[(usize, &crate::viewer::index::Shot)],
+    vi: usize,
+    item_w: f32,
+    rect: Rect,
+    selected_shot: &mut Option<usize>,
+    needs_scroll: bool,
+) {
+    let (i, shot) = visible[vi];
+    let x = rect.min.x + vi as f32 * item_w;
+    let thumb_rect = Rect::from_min_size(
+        Pos2::new(x, rect.min.y),
+        Vec2::new(THUMB_W, THUMB_H),
+    );
+    let uri = format!("file://{}", shot.png.display());
+    let img = egui::Image::new(uri)
+        .fit_to_exact_size(Vec2::new(THUMB_W, THUMB_H))
+        .sense(Sense::click());
+    let resp = ui.put(thumb_rect, img);
+
+    let selected = *selected_shot == Some(i);
+    if selected {
+        ui.painter().rect_stroke(
+            thumb_rect.shrink(1.5),
+            3.0,
+            Stroke::new(3.0, Color32::from_rgb(255, 220, 80)),
+        );
+        if needs_scroll {
+            resp.scroll_to_me(Some(Align::Center));
+        }
+    }
+    let resp = resp.on_hover_text(format!("{}", shot.time.format("%H:%M:%S")));
+    if resp.clicked() {
+        *selected_shot = Some(i);
     }
 }
