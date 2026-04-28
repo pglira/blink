@@ -19,6 +19,14 @@ fn main() -> Result<()> {
     // should keep running across that.
     unsafe { libc::signal(libc::SIGHUP, libc::SIG_IGN); }
 
+    // XDG autostart and systemd user services frequently launch us without
+    // DISPLAY/XAUTHORITY in the environment, which kills both xcap (the
+    // capture path) and eframe (the viewer) when they try to talk to X.
+    // Fill in conventional defaults if they're missing so the binary works
+    // out of the box on typical single-X sessions; subprocesses spawned
+    // later (the viewer launched from the tray) inherit these too.
+    ensure_x11_env();
+
     init_tracing();
 
     let sub = std::env::args().nth(1).unwrap_or_else(|| "run".into());
@@ -100,6 +108,20 @@ fn run() -> Result<()> {
 
     info!("blink stopped cleanly");
     Ok(())
+}
+
+fn ensure_x11_env() {
+    if std::env::var_os("DISPLAY").is_none() {
+        std::env::set_var("DISPLAY", ":0");
+    }
+    if std::env::var_os("XAUTHORITY").is_none() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let xauth = std::path::PathBuf::from(home).join(".Xauthority");
+            if xauth.exists() {
+                std::env::set_var("XAUTHORITY", xauth);
+            }
+        }
+    }
 }
 
 fn init_tracing() {
