@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use chrono::Local;
+use chrono::{DateTime, Local};
 use image::{
     codecs::png::{CompressionType, FilterType, PngEncoder},
     ExtendedColorType, ImageEncoder, RgbImage,
@@ -35,12 +35,16 @@ pub fn run(cfg: Config, state: Arc<AppState>) -> Result<()> {
         }
 
         if !state.paused.load(Ordering::SeqCst) {
+            // Capture timestamp shared by the PNG filename and the sidecar so
+            // they can never disagree.
+            let captured_at = Local::now();
             match grab_composite(&cfg) {
                 Ok(Some(canvas)) => match encode_png(&canvas) {
-                    Ok(bytes) => match write_screenshot(&output_dir, &bytes) {
+                    Ok(bytes) => match write_screenshot(&output_dir, &captured_at, &bytes) {
                         Ok(path) => {
                             debug!(path = %path.display(), bytes = bytes.len(), "screenshot saved");
-                            if let Err(e) = write_sidecar(&path, interval.as_secs()) {
+                            if let Err(e) = write_sidecar(&path, &captured_at, interval.as_secs())
+                            {
                                 warn!("sidecar metadata write failed: {e:#}");
                             }
                         }
@@ -128,14 +132,17 @@ fn encode_png(img: &RgbImage) -> Result<Vec<u8>> {
 }
 
 /// Write `<output_dir>/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png` atomically.
-fn write_screenshot(output_dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
-    let now = Local::now();
+fn write_screenshot(
+    output_dir: &Path,
+    captured_at: &DateTime<Local>,
+    bytes: &[u8],
+) -> Result<PathBuf> {
     let dir = output_dir
-        .join(now.format("%Y").to_string())
-        .join(now.format("%m").to_string());
+        .join(captured_at.format("%Y").to_string())
+        .join(captured_at.format("%m").to_string());
     fs::create_dir_all(&dir)?;
 
-    let stem = now.format("%Y_%m_%d_%H_%M_%S").to_string();
+    let stem = captured_at.format("%Y_%m_%d_%H_%M_%S").to_string();
     let final_path = dir.join(format!("{stem}.png"));
     let tmp_path = dir.join(format!("{stem}.png.tmp"));
 
@@ -149,12 +156,20 @@ fn write_screenshot(output_dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
 }
 
 /// Write the per-screenshot metadata sidecar `<stem>.toml` next to the PNG.
-/// Atomic via `.tmp` + rename, like the PNG. Currently only `interval_seconds`;
-/// future metadata keys land here.
-fn write_sidecar(png_path: &Path, interval_seconds: u64) -> Result<()> {
+/// Atomic via `.tmp` + rename, like the PNG. Captures the wall-clock time
+/// (RFC 3339 with timezone offset) and the capture interval in effect, so
+/// downstream tools don't have to re-parse the filename.
+fn write_sidecar(
+    png_path: &Path,
+    captured_at: &DateTime<Local>,
+    interval_seconds: u64,
+) -> Result<()> {
     let toml_path = png_path.with_extension("toml");
     let tmp_path = toml_path.with_extension("toml.tmp");
-    let body = format!("interval_seconds = {interval_seconds}\n");
+    let body = format!(
+        "captured_at = \"{}\"\ninterval_seconds = {interval_seconds}\n",
+        captured_at.to_rfc3339()
+    );
     {
         let mut f = fs::File::create(&tmp_path)?;
         f.write_all(body.as_bytes())?;

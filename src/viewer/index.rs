@@ -55,11 +55,20 @@ impl Index {
                     if path.extension().and_then(|e| e.to_str()) != Some("png") {
                         continue;
                     }
-                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
-                    let Ok(time) = NaiveDateTime::parse_from_str(stem, "%Y_%m_%d_%H_%M_%S") else {
-                        continue;
-                    };
-                    let duration_s = read_sidecar_interval(&path).unwrap_or(fallback_interval_s);
+                    let sidecar = read_sidecar(&path);
+                    // Prefer the sidecar timestamp when present; fall back to
+                    // the filename for screenshots taken before sidecars.
+                    let time = sidecar
+                        .as_ref()
+                        .and_then(|s| s.captured_at)
+                        .or_else(|| {
+                            let stem = path.file_stem().and_then(|s| s.to_str())?;
+                            NaiveDateTime::parse_from_str(stem, "%Y_%m_%d_%H_%M_%S").ok()
+                        });
+                    let Some(time) = time else { continue };
+                    let duration_s = sidecar
+                        .and_then(|s| s.interval_seconds)
+                        .unwrap_or(fallback_interval_s);
                     let date = time.date();
                     days.entry(date).or_default().shots.push(Shot {
                         time,
@@ -82,13 +91,33 @@ impl Index {
 }
 
 #[derive(Deserialize)]
-struct Sidecar {
-    interval_seconds: u64,
+struct SidecarRaw {
+    #[serde(default)]
+    captured_at: Option<String>,
+    #[serde(default)]
+    interval_seconds: Option<u64>,
 }
 
-fn read_sidecar_interval(png_path: &Path) -> Option<u64> {
+struct Sidecar {
+    captured_at: Option<NaiveDateTime>,
+    interval_seconds: Option<u64>,
+}
+
+fn read_sidecar(png_path: &Path) -> Option<Sidecar> {
     let toml_path = png_path.with_extension("toml");
     let raw = fs::read_to_string(&toml_path).ok()?;
-    let s: Sidecar = toml::from_str(&raw).ok()?;
-    Some(s.interval_seconds)
+    let parsed: SidecarRaw = toml::from_str(&raw).ok()?;
+    let captured_at = parsed.captured_at.as_deref().and_then(parse_captured_at);
+    Some(Sidecar {
+        captured_at,
+        interval_seconds: parsed.interval_seconds,
+    })
+}
+
+/// Parses an RFC 3339 timestamp into a local-clock `NaiveDateTime`. The
+/// viewer groups by local date, so we collapse the timezone offset rather
+/// than carrying it around.
+fn parse_captured_at(s: &str) -> Option<NaiveDateTime> {
+    let dt = chrono::DateTime::parse_from_rfc3339(s).ok()?;
+    Some(dt.with_timezone(&chrono::Local).naive_local())
 }
