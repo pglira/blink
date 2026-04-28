@@ -55,22 +55,11 @@ impl Index {
                     if path.extension().and_then(|e| e.to_str()) != Some("png") {
                         continue;
                     }
-                    let sidecar = read_sidecar(&path);
-                    // Prefer the sidecar timestamp when present; fall back to
-                    // the filename for screenshots without a sidecar (older
-                    // captures or sidecar lost).
-                    let time = sidecar
-                        .as_ref()
-                        .and_then(|s| s.captured_at)
-                        .or_else(|| {
-                            path.file_stem()
-                                .and_then(|s| s.to_str())
-                                .and_then(parse_filename_stem)
-                        });
-                    let Some(time) = time else { continue };
-                    let duration_s = sidecar
-                        .and_then(|s| s.interval_seconds)
-                        .unwrap_or(fallback_interval_s);
+                    // Sidecar is the only source of truth for the capture
+                    // timestamp; PNGs without a readable sidecar are skipped.
+                    let Some(sidecar) = read_sidecar(&path) else { continue };
+                    let Some(time) = sidecar.captured_at else { continue };
+                    let duration_s = sidecar.interval_seconds.unwrap_or(fallback_interval_s);
                     let date = time.date();
                     days.entry(date).or_default().shots.push(Shot {
                         time,
@@ -126,25 +115,3 @@ fn parse_captured_at(s: &str) -> Option<NaiveDateTime> {
     Some(dt.naive_local())
 }
 
-/// Fallback for screenshots whose sidecar is missing. Recognises both the
-/// old local-time stem (`YYYY_MM_DD_HH_MM_SS`) and the new UTC stem
-/// (`YYYY_MM_DDTHHMMSSZ`). The returned time is interpreted as wall-clock
-/// local time at capture, which is the best we can do without an offset
-/// recorded somewhere — for the new UTC stems this means the local-clock
-/// is taken to be the viewer's current timezone, which is correct when
-/// the daemon hasn't crossed timezones since capture.
-fn parse_filename_stem(stem: &str) -> Option<NaiveDateTime> {
-    if let Ok(dt) = NaiveDateTime::parse_from_str(stem, "%Y_%m_%d_%H_%M_%S") {
-        return Some(dt);
-    }
-    if let Some(prefix) = stem.strip_suffix('Z') {
-        if let Ok(utc) = NaiveDateTime::parse_from_str(prefix, "%Y_%m_%dT%H%M%S") {
-            return Some(
-                chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(utc, chrono::Utc)
-                    .with_timezone(&chrono::Local)
-                    .naive_local(),
-            );
-        }
-    }
-    None
-}
