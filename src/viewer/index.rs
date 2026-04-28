@@ -49,23 +49,30 @@ impl Index {
                 if !month_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     continue;
                 }
-                let Ok(file_iter) = fs::read_dir(month_entry.path()) else { continue };
-                for file_entry in file_iter.flatten() {
-                    let path = file_entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("png") {
+                let Ok(day_iter) = fs::read_dir(month_entry.path()) else { continue };
+                for day_entry in day_iter.flatten() {
+                    if !day_entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                         continue;
                     }
-                    // Sidecar is the only source of truth for the capture
-                    // timestamp; PNGs without a readable sidecar are skipped.
-                    let Some(sidecar) = read_sidecar(&path) else { continue };
-                    let Some(time) = sidecar.captured_at else { continue };
-                    let duration_s = sidecar.interval_seconds.unwrap_or(fallback_interval_s);
-                    let date = time.date();
-                    days.entry(date).or_default().shots.push(Shot {
-                        time,
-                        png: path,
-                        duration_s,
-                    });
+                    let Ok(file_iter) = fs::read_dir(day_entry.path()) else { continue };
+                    for file_entry in file_iter.flatten() {
+                        let path = file_entry.path();
+                        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+                            continue;
+                        }
+                        // Sidecar is the only source of truth for the capture
+                        // timestamp; PNGs without a readable sidecar are skipped.
+                        let Some(sidecar) = read_sidecar(&path) else { continue };
+                        let Some(time) = sidecar.captured_at else { continue };
+                        let duration_s =
+                            sidecar.interval_seconds.unwrap_or(fallback_interval_s);
+                        let date = time.date();
+                        days.entry(date).or_default().shots.push(Shot {
+                            time,
+                            png: path,
+                            duration_s,
+                        });
+                    }
                 }
             }
         }

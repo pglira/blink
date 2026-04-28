@@ -202,9 +202,9 @@ fn bump_sidecar_interval(toml_path: &Path, add_seconds: u64) -> Result<u64> {
     Ok(total)
 }
 
-/// Write `<output_dir>/YYYY/MM/YYYY_MM_DDTHHMMSSZ.png` atomically.
+/// Write `<output_dir>/YYYY/MM/DD/YYYY_MM_DDTHHMMSSZ.png` atomically.
 ///
-/// The directory uses the *local* year/month at capture, so the on-disk
+/// The directory uses the *local* year/month/day at capture, so the on-disk
 /// layout matches the calendar day a user would associate with the shot.
 /// The filename uses *UTC* in compact ISO 8601 form (with the trailing
 /// `Z`), which makes it globally unique even if the capturing machine's
@@ -218,7 +218,8 @@ fn write_screenshot(
 ) -> Result<PathBuf> {
     let dir = output_dir
         .join(captured_at.format("%Y").to_string())
-        .join(captured_at.format("%m").to_string());
+        .join(captured_at.format("%m").to_string())
+        .join(captured_at.format("%d").to_string());
     fs::create_dir_all(&dir)?;
 
     let stem = captured_at
