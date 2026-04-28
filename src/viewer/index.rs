@@ -94,6 +94,17 @@ struct SidecarRaw {
     captured_at: Option<String>,
     #[serde(default)]
     interval_seconds: Option<u64>,
+    // Parsed but not yet surfaced in the UI; lands here so future viewer
+    // changes can read them without another sidecar revision.
+    #[serde(default)]
+    #[allow(dead_code)]
+    hostname: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    window_title: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    window_class: Option<String>,
 }
 
 struct Sidecar {

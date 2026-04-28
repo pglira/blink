@@ -15,6 +15,8 @@ use image::{
     ExtendedColorType, ImageEncoder, RgbImage,
 };
 use tracing::{debug, error, info, warn};
+use x11rb::connection::Connection as _;
+use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _};
 
 use crate::config::Config;
 use crate::state::AppState;
@@ -23,9 +25,11 @@ pub fn run(cfg: Config, state: Arc<AppState>) -> Result<()> {
     let interval = Duration::from_secs(cfg.capture.interval_seconds.max(1));
     let output_dir = cfg.output_dir();
     fs::create_dir_all(&output_dir)?;
+    let hostname = read_hostname();
     info!(
         interval_s = interval.as_secs(),
         output = %output_dir.display(),
+        host = %hostname,
         "capture thread started"
     );
 
@@ -65,10 +69,15 @@ pub fn run(cfg: Config, state: Arc<AppState>) -> Result<()> {
                             Ok(bytes) => match write_screenshot(&output_dir, &captured_at, &bytes) {
                                 Ok(path) => {
                                     debug!(path = %path.display(), bytes = bytes.len(), "screenshot saved");
+                                    let win = read_active_window().unwrap_or_default();
                                     let sidecar = path.with_extension("toml");
-                                    if let Err(e) =
-                                        write_sidecar(&sidecar, &captured_at, interval.as_secs())
-                                    {
+                                    if let Err(e) = write_sidecar(
+                                        &sidecar,
+                                        &captured_at,
+                                        interval.as_secs(),
+                                        &hostname,
+                                        &win,
+                                    ) {
                                         warn!("sidecar metadata write failed: {e:#}");
                                     }
                                     prev_hash = Some(h);
@@ -240,17 +249,29 @@ fn write_screenshot(
 
 /// Write the per-screenshot metadata sidecar `<stem>.toml`. Atomic via
 /// `.tmp` + rename. Captures the wall-clock time (RFC 3339 with timezone
-/// offset) and the capture interval in effect.
+/// offset), the capture interval in effect, the hostname of the capturing
+/// machine, and the active window's title and class (if available).
 fn write_sidecar(
     toml_path: &Path,
     captured_at: &DateTime<Local>,
     interval_seconds: u64,
+    hostname: &str,
+    win: &ActiveWindow,
 ) -> Result<()> {
     let tmp_path = toml_path.with_extension("toml.tmp");
-    let body = format!(
-        "captured_at = \"{}\"\ninterval_seconds = {interval_seconds}\n",
+    let mut body = String::with_capacity(256);
+    body.push_str(&format!(
+        "captured_at = \"{}\"\n",
         captured_at.to_rfc3339()
-    );
+    ));
+    body.push_str(&format!("interval_seconds = {interval_seconds}\n"));
+    body.push_str(&format!("hostname = \"{}\"\n", toml_escape(hostname)));
+    if let Some(t) = win.title.as_deref() {
+        body.push_str(&format!("window_title = \"{}\"\n", toml_escape(t)));
+    }
+    if let Some(c) = win.class.as_deref() {
+        body.push_str(&format!("window_class = \"{}\"\n", toml_escape(c)));
+    }
     {
         let mut f = fs::File::create(&tmp_path)?;
         f.write_all(body.as_bytes())?;
@@ -258,4 +279,114 @@ fn write_sidecar(
     }
     fs::rename(&tmp_path, &toml_path)?;
     Ok(())
+}
+
+#[derive(Default)]
+struct ActiveWindow {
+    title: Option<String>,
+    class: Option<String>,
+}
+
+/// Read the focused window's `_NET_WM_NAME` and `WM_CLASS` via X11. Best
+/// effort: any failure (no DISPLAY, no compositor support, Wayland-only
+/// session, etc.) just yields `None` for both fields.
+fn read_active_window() -> Result<ActiveWindow> {
+    let (conn, screen_num) = x11rb::connect(None)?;
+    let root = conn.setup().roots[screen_num].root;
+
+    let net_active = conn
+        .intern_atom(false, b"_NET_ACTIVE_WINDOW")?
+        .reply()?
+        .atom;
+    let net_wm_name = conn.intern_atom(false, b"_NET_WM_NAME")?.reply()?.atom;
+    let utf8_string = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
+
+    let active_prop = conn
+        .get_property(false, root, net_active, AtomEnum::WINDOW, 0, 1)?
+        .reply()?;
+    let active = active_prop
+        .value32()
+        .and_then(|mut it| it.next())
+        .filter(|&w| w != 0);
+    let Some(win) = active else {
+        return Ok(ActiveWindow::default());
+    };
+
+    // Title: prefer UTF-8 _NET_WM_NAME; fall back to legacy WM_NAME.
+    let mut title = read_string_prop(&conn, win, net_wm_name, utf8_string)?;
+    if title.is_none() {
+        title = read_string_prop(&conn, win, AtomEnum::WM_NAME.into(), AtomEnum::STRING.into())?;
+    }
+
+    // WM_CLASS is "instance\0class\0" (NUL-separated, latin1).
+    let class_bytes = conn
+        .get_property(
+            false,
+            win,
+            AtomEnum::WM_CLASS,
+            AtomEnum::STRING,
+            0,
+            1024,
+        )?
+        .reply()?
+        .value;
+    let class = parse_wm_class(&class_bytes);
+
+    Ok(ActiveWindow { title, class })
+}
+
+fn read_string_prop(
+    conn: &impl x11rb::connection::Connection,
+    window: u32,
+    property: u32,
+    type_: u32,
+) -> Result<Option<String>> {
+    let bytes = conn
+        .get_property(false, window, property, type_, 0, 4096)?
+        .reply()?
+        .value;
+    if bytes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+    }
+}
+
+fn parse_wm_class(bytes: &[u8]) -> Option<String> {
+    // Skip the instance, take the class. Both are NUL-terminated.
+    let mut parts = bytes.split(|&b| b == 0).filter(|s| !s.is_empty());
+    let _instance = parts.next()?;
+    let class = parts.next()?;
+    Some(String::from_utf8_lossy(class).into_owned())
+}
+
+fn read_hostname() -> String {
+    let mut buf = [0u8; 256];
+    let rc = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) };
+    if rc != 0 {
+        return "(unknown)".to_string();
+    }
+    let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    String::from_utf8_lossy(&buf[..nul]).into_owned()
+}
+
+/// Minimal TOML-basic-string escape: backslash, double-quote and the few
+/// control characters that need escape sequences. Window titles arrive
+/// from arbitrary apps and may contain quotes.
+fn toml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
