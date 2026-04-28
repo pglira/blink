@@ -124,10 +124,26 @@ pub fn run(state: Arc<AppState>) -> Result<()> {
 /// Re-execs the current binary with the `view` subcommand.
 fn spawn_viewer() -> Result<()> {
     let exe = std::env::current_exe().context("current_exe")?;
-    std::process::Command::new(exe)
-        .arg("view")
-        .spawn()
-        .context("spawning viewer")?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("view");
+
+    // XDG autostart (and some session managers) launch us without a useful
+    // X11 environment — DISPLAY and XAUTHORITY are missing, so the tray
+    // works (DBus only) but a spawned viewer can't open an X window. Fill
+    // in conventional defaults when they're absent.
+    if std::env::var_os("DISPLAY").is_none() {
+        cmd.env("DISPLAY", ":0");
+    }
+    if std::env::var_os("XAUTHORITY").is_none() {
+        if let Some(home) = std::env::var_os("HOME") {
+            let xauth = std::path::PathBuf::from(home).join(".Xauthority");
+            if xauth.exists() {
+                cmd.env("XAUTHORITY", xauth);
+            }
+        }
+    }
+
+    cmd.spawn().context("spawning viewer")?;
     info!("viewer launched from tray");
     Ok(())
 }
