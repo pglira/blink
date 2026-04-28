@@ -10,8 +10,6 @@ pub const DEFAULT_CONFIG_TOML: &str = include_str!("../config/default.toml");
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     pub capture: CaptureConfig,
-    pub video: VideoConfig,
-    pub staging: StagingConfig,
     pub output: OutputConfig,
     pub daemon: DaemonConfig,
 }
@@ -21,31 +19,6 @@ pub struct CaptureConfig {
     pub interval_seconds: u64,
     /// "all" or "primary".
     pub monitors: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct VideoConfig {
-    /// "h264", "h265" or "av1".
-    pub codec: String,
-    pub crf: u8,
-    pub segment_minutes: u64,
-    /// Playback frame rate. With the default 60s capture interval, fps=2
-    /// plays back 30 captured seconds per video second (120× speedup).
-    pub fps: u32,
-    /// If true, start a new segment at local midnight so each MKV covers a
-    /// single calendar day.
-    #[serde(default = "default_true")]
-    pub daily_split: bool,
-}
-
-fn default_true() -> bool { true }
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct StagingConfig {
-    #[serde(default)]
-    pub dir: String,
-    pub jpeg_quality: u8,
-    pub keep_after_encode: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -81,9 +54,6 @@ impl Config {
     }
 
     fn finalize(&mut self) -> Result<()> {
-        if self.staging.dir.is_empty() {
-            self.staging.dir = default_staging_dir()?.to_string_lossy().into_owned();
-        }
         if self.output.dir.is_empty() {
             self.output.dir = default_output_dir()?.to_string_lossy().into_owned();
         }
@@ -98,9 +68,8 @@ impl Config {
         Ok(())
     }
 
-    pub fn staging_dir(&self) -> PathBuf { expand(&self.staging.dir) }
-    pub fn output_dir(&self)  -> PathBuf { expand(&self.output.dir) }
-    pub fn pid_file(&self)    -> PathBuf { expand(&self.daemon.pid_file) }
+    pub fn output_dir(&self) -> PathBuf { expand(&self.output.dir) }
+    pub fn pid_file(&self)   -> PathBuf { expand(&self.daemon.pid_file) }
 }
 
 fn expand(s: &str) -> PathBuf {
@@ -124,14 +93,10 @@ fn default_cache_dir() -> Result<PathBuf> {
     Ok(dirs.cache_dir().to_path_buf())
 }
 
-fn default_staging_dir() -> Result<PathBuf> {
-    Ok(default_cache_dir()?.join("staging"))
-}
-
 fn default_output_dir() -> Result<PathBuf> {
     if let Some(ud) = directories::UserDirs::new() {
-        if let Some(videos) = ud.video_dir() {
-            return Ok(videos.join("blink"));
+        if let Some(pictures) = ud.picture_dir() {
+            return Ok(pictures.join("blink"));
         }
     }
     Ok(default_cache_dir()?.join("output"))

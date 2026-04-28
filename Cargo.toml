@@ -2,18 +2,16 @@
 name = "blink"
 version = "0.1.0"
 edition = "2021"
-description = "Background screen recording daemon with crash-resilient MKV output"
+description = "Background screenshot daemon — periodic PNG snapshots into a year/month archive"
 license = "MIT"
 rust-version = "1.75"
 
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-crossbeam-channel = "0.5"
 ctrlc = { version = "3", features = ["termination"] }
 directories = "5"
-ffmpeg-next = "6.1"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 libc = "0.2.186"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

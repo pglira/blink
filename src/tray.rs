@@ -10,12 +10,12 @@ use tracing::info;
 use crate::state::AppState;
 
 const SIZE: i32 = 32;
-const DESC_REC: &str = "Blink — recording";
+const DESC_ACTIVE: &str = "Blink — capturing";
 const DESC_PAUSED: &str = "Blink — paused";
 
 struct BlinkTray {
     state: Arc<AppState>,
-    icon_rec: Vec<u8>,
+    icon_active: Vec<u8>,
     icon_paused: Vec<u8>,
 }
 
@@ -32,7 +32,7 @@ impl Tray for BlinkTray {
         let data = if self.state.paused.load(Ordering::SeqCst) {
             self.icon_paused.clone()
         } else {
-            self.icon_rec.clone()
+            self.icon_active.clone()
         };
         vec![Icon {
             width: SIZE,
@@ -45,7 +45,7 @@ impl Tray for BlinkTray {
         let title = if self.state.paused.load(Ordering::SeqCst) {
             DESC_PAUSED
         } else {
-            DESC_REC
+            DESC_ACTIVE
         };
         ToolTip {
             title: title.into(),
@@ -86,7 +86,7 @@ impl Tray for BlinkTray {
 pub fn run(state: Arc<AppState>) -> Result<()> {
     let tray = BlinkTray {
         state: state.clone(),
-        icon_rec: render_recording_icon(),
+        icon_active: render_active_icon(),
         icon_paused: render_paused_icon(),
     };
     let service = TrayService::new(tray);
@@ -110,11 +110,11 @@ pub fn run(state: Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
-/// Recording icon: open eye — filled blue almond with a white pupil.
+/// Active icon: open eye — filled blue almond with a white pupil.
 /// The almond is the intersection of two circles of radius R centred h pixels
 /// above/below the canvas centre. With h=8, R=13 on 32×32 the almond spans
 /// ~20×10 px — classic eye proportions.
-fn render_recording_icon() -> Vec<u8> {
+fn render_active_icon() -> Vec<u8> {
     const H: f32 = 8.0;
     const R_SQ: f32 = 13.0 * 13.0;
     render_icon(|dx, dy| {

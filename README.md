@@ -1,49 +1,31 @@
 # blink
 
 A small Linux daemon that silently takes a screenshot every N seconds and
-appends it to a compressed H.264/Matroska video. Designed to keep running in
-the background, survive crashes without corrupting the archive, and stay out
-of the way — visible only as a tray icon.
+saves it as a compressed PNG into a `YYYY/MM/` archive. Designed to keep
+running in the background and stay out of the way — visible only as a
+tray icon.
 
 ## Features
 
 - Periodic multi-monitor capture via `xcap` (X11 primary, Wayland best-effort).
-  Monitors are composited side-by-side into one canvas per frame.
-- Continuous H.264 encoding into MKV segments via linked `libav` (no
-  `ffmpeg` subprocess). MKV is chosen because truncated files remain playable.
-- Automatic segment rotation when the monitor layout changes (resolution or
-  connect/disconnect of a display), when `segment_minutes` elapses, or at
-  local midnight (so each MKV covers a single calendar day by default).
-- Crash resilience: staged JPEGs are only deleted once the corresponding
-  frame is flushed and fsynced; MKV muxer runs with `flush_packets=1`.
-  Any orphan JPEGs from a prior run are drained into `recovery_*.mkv` at
-  startup.
+  Monitors are composited side-by-side into one PNG per tick.
+- Screenshots saved as PNG at maximum zlib compression with adaptive
+  per-scanline filtering. Lossless and well suited to flat-colour-heavy
+  desktop captures.
+- Output organised as `<output_dir>/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png`,
+  written atomically via a temporary `.tmp` file + rename so a crash mid-write
+  never leaves a half-written PNG behind.
 - System tray icon with Pause / Resume / Quit. Icon shows current status
-  (blue open eye = recording, gray closed eye = paused).
+  (blue open eye = capturing, gray closed eye = paused).
 - Single TOML config at `~/.config/blink/config.toml` (written on first run).
 
 ## Build
 
-The project targets Linux (X11 + GTK). It currently assumes the versions of
-libav that ship with Ubuntu 24.04 (`libav*.so.60`).
-
-### Using the devcontainer
-
-The [`.devcontainer`](.devcontainer/) here installs the full toolchain:
-
-```
-Reopen in Container  →  cargo build --release
-```
-
-### Building manually
-
-Install native dependencies (apt package names for Ubuntu 24.04):
+The project targets Linux (X11). Native dependencies (apt package names
+for Ubuntu 24.04):
 
 ```
 pkg-config
-libavformat-dev libavcodec-dev libavutil-dev libswscale-dev
-libavfilter-dev libavdevice-dev
-libgtk-3-dev libayatana-appindicator3-dev
 libxcb1-dev libxrandr-dev libxfixes-dev libxext-dev libxdo-dev
 libssl-dev
 ```
@@ -54,7 +36,15 @@ Then install a stable Rust toolchain via `rustup` and:
 cargo build --release
 ```
 
-The binary is `target/release/blink` (~4 MB stripped).
+The binary is `target/release/blink`.
+
+### Using the devcontainer
+
+The [`.devcontainer`](.devcontainer/) here installs the toolchain:
+
+```
+Reopen in Container  →  cargo build --release
+```
 
 ## Run
 
@@ -80,20 +70,15 @@ in the tray after every login.
 First run writes a default config to `~/.config/blink/config.toml`.
 Default paths:
 
-- Frames staging: `~/.cache/blink/staging/` (each frame as a timestamped JPEG
-  until it has been successfully encoded; normally empty)
-- Video output:   `~/Videos/blink/` (`blink_YYYYMMDD-HHMMSS_WxH.mkv`)
-- PID lock:       `~/.cache/blink/blink.pid`
+- Screenshots: `~/Pictures/blink/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png`
+- PID lock:    `~/.cache/blink/blink.pid`
 
 The tray menu offers:
 
 - **Pause / Resume** — toggles capture. Icon changes to reflect status.
-- **Quit** — clean shutdown: flush encoder, write MKV trailer, remove PID
-  file, exit.
+- **Quit** — clean shutdown: stop the capture loop, remove PID file, exit.
 
-The daemon also handles `SIGINT` and `SIGTERM` as graceful shutdown, so
-system shutdown or a `kill <pid>` from a terminal leaves properly finalized
-files.
+The daemon also handles `SIGINT` and `SIGTERM` as graceful shutdown.
 
 ## Config reference
 
@@ -104,38 +89,19 @@ files.
 interval_seconds = 60      # one frame per minute
 monitors = "all"           # "all" | "primary"
 
-[video]
-codec = "h264"             # h264 | h265 | av1
-crf = 28                   # lower = higher quality, larger files
-segment_minutes = 60       # roll over to a new MKV every hour
-daily_split = true         # also roll over at local midnight (one MKV per day)
-
-[staging]
-jpeg_quality = 85
-keep_after_encode = false  # keep the JPEGs on disk after encoding
-                           # (enable to feed a future OCR pass)
-
 [output]
-dir = ""                   # empty → ~/Videos/blink
+dir = ""                   # empty → ~/Pictures/blink
 
 [daemon]
 pid_file = ""              # empty → ~/.cache/blink/blink.pid
 log_file = ""              # (reserved; current build logs to stderr)
 ```
 
-## What the daemon does on shutdown
-
-| Scenario                                      | Resulting file                          | Frame loss |
-|-----------------------------------------------|-----------------------------------------|------------|
-| `Quit` from tray, `SIGINT`, `SIGTERM`, logout | Properly finalized MKV with trailer     | None       |
-| `SIGKILL`, kernel panic, power cut            | Valid MKV without trailer (plays fine up to last flushed cluster) | ≤ 1 in-flight frame |
-| Daemon exits then restarts with JPEGs left in staging | Drained into `recovery_*.mkv` on next startup | None       |
-
 ## Project layout
 
 ```
 .
-├── .devcontainer/          VS Code devcontainer (Rust + libav + GTK + X11)
+├── .devcontainer/          VS Code devcontainer
 ├── config/default.toml     Embedded default config, written on first run
 ├── config/blink.desktop    XDG autostart entry (copy to ~/.config/autostart/)
 ├── Cargo.toml
@@ -143,18 +109,9 @@ log_file = ""              # (reserved; current build logs to stderr)
     ├── main.rs             CLI, thread orchestration, signal handling
     ├── config.rs           TOML loader, XDG path resolution
     ├── state.rs            Shared AtomicBool flags + PID file guard
-    ├── staging.rs          Atomic JPEG writes + pending_frames scan
-    ├── capture.rs          xcap screenshot loop, monitor composite
-    ├── encoder.rs          libav MKV muxer, segment rotation, recovery
-    └── tray.rs             AppIndicator tray icon + GTK menu
+    ├── capture.rs          xcap screenshot loop, PNG encode + atomic write
+    └── tray.rs             ksni StatusNotifierItem tray icon + menu
 ```
-
-## Planned / hook points
-
-- Text journal: OCR each frame and write timestamped text entries. The code
-  already names staged JPEGs `<unix_millis>.jpg` and retains them when
-  `keep_after_encode = true`, so a future `blink ocr` subcommand can iterate
-  them in timestamp order without touching the capture/encode pipeline.
 
 ## Licence
 

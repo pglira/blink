@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=blink
-Comment=Background screen recording daemon
+Comment=Background screenshot daemon
 Exec=blink
-Icon=camera-video
+Icon=camera-photo
 Terminal=false
 Categories=Utility;
 X-GNOME-Autostart-enabled=true

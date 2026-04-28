@@ -1,29 +1,29 @@
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use crossbeam_channel::Sender;
-use image::{codecs::jpeg::JpegEncoder, ExtendedColorType, ImageEncoder, RgbImage};
+use chrono::Local;
+use image::{
+    codecs::png::{CompressionType, FilterType, PngEncoder},
+    ExtendedColorType, ImageEncoder, RgbImage,
+};
 use tracing::{debug, error, info, warn};
 
 use crate::config::Config;
-use crate::staging;
 use crate::state::AppState;
 
-pub enum Signal {
-    /// A new JPEG has been written to staging. The encoder rescans the
-    /// staging dir on wake-up, so the path itself is not carried here.
-    FrameReady,
-}
-
-pub fn run(cfg: Config, state: Arc<AppState>, tx: Sender<Signal>) -> Result<()> {
+pub fn run(cfg: Config, state: Arc<AppState>) -> Result<()> {
     let interval = Duration::from_secs(cfg.capture.interval_seconds.max(1));
-    let staging_dir = cfg.staging_dir();
+    let output_dir = cfg.output_dir();
+    fs::create_dir_all(&output_dir)?;
     info!(
         interval_s = interval.as_secs(),
-        staging = %staging_dir.display(),
+        output = %output_dir.display(),
         "capture thread started"
     );
 
@@ -36,15 +36,12 @@ pub fn run(cfg: Config, state: Arc<AppState>, tx: Sender<Signal>) -> Result<()> 
 
         if !state.paused.load(Ordering::SeqCst) {
             match grab_composite(&cfg) {
-                Ok(Some(canvas)) => match encode_jpeg(&canvas, cfg.staging.jpeg_quality) {
-                    Ok(bytes) => match staging::stage_jpeg(&staging_dir, &bytes) {
-                        Ok(path) => {
-                            debug!(path = %path.display(), "frame staged");
-                            let _ = tx.send(Signal::FrameReady);
-                        }
-                        Err(e) => error!("staging frame failed: {e:#}"),
+                Ok(Some(canvas)) => match encode_png(&canvas) {
+                    Ok(bytes) => match write_screenshot(&output_dir, &bytes) {
+                        Ok(path) => debug!(path = %path.display(), bytes = bytes.len(), "screenshot saved"),
+                        Err(e) => error!("writing screenshot failed: {e:#}"),
                     },
-                    Err(e) => error!("JPEG encode failed: {e:#}"),
+                    Err(e) => error!("PNG encode failed: {e:#}"),
                 },
                 Ok(None) => warn!("no monitors available, skipping tick"),
                 Err(e) => error!("screenshot failed: {e:#}"),
@@ -69,8 +66,6 @@ pub fn run(cfg: Config, state: Arc<AppState>, tx: Sender<Signal>) -> Result<()> 
 }
 
 /// Grab configured monitors and composite them horizontally into one RGB image.
-/// Dimension changes between calls are what drive segment rotation downstream:
-/// the encoder sees the JPEG size and rotates when it shifts.
 fn grab_composite(cfg: &Config) -> Result<Option<RgbImage>> {
     let monitors = xcap::Monitor::all().map_err(|e| anyhow!("xcap::Monitor::all: {e}"))?;
     if monitors.is_empty() {
@@ -102,11 +97,8 @@ fn grab_composite(cfg: &Config) -> Result<Option<RgbImage>> {
     if total_w == 0 || max_h == 0 {
         return Ok(None);
     }
-    // H.264 (yuv420p) requires even dimensions.
-    let canvas_w = total_w + (total_w & 1);
-    let canvas_h = max_h + (max_h & 1);
 
-    let mut canvas = RgbImage::new(canvas_w, canvas_h);
+    let mut canvas = RgbImage::new(total_w, max_h);
     let mut x_off: i64 = 0;
     for img in &rgbs {
         image::imageops::overlay(&mut canvas, img, x_off, 0);
@@ -115,9 +107,12 @@ fn grab_composite(cfg: &Config) -> Result<Option<RgbImage>> {
     Ok(Some(canvas))
 }
 
-fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
+fn encode_png(img: &RgbImage) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(1 << 20);
-    let encoder = JpegEncoder::new_with_quality(&mut buf, quality);
+    // Best compression — screenshots are flat-colour heavy and we run at a
+    // 60 s cadence, so the extra CPU per frame is well under the budget.
+    let encoder =
+        PngEncoder::new_with_quality(&mut buf, CompressionType::Best, FilterType::Adaptive);
     encoder.write_image(
         img.as_raw(),
         img.width(),
@@ -125,4 +120,25 @@ fn encode_jpeg(img: &RgbImage, quality: u8) -> Result<Vec<u8>> {
         ExtendedColorType::Rgb8,
     )?;
     Ok(buf)
+}
+
+/// Write `<output_dir>/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png` atomically.
+fn write_screenshot(output_dir: &Path, bytes: &[u8]) -> Result<PathBuf> {
+    let now = Local::now();
+    let dir = output_dir
+        .join(now.format("%Y").to_string())
+        .join(now.format("%m").to_string());
+    fs::create_dir_all(&dir)?;
+
+    let stem = now.format("%Y_%m_%d_%H_%M_%S").to_string();
+    let final_path = dir.join(format!("{stem}.png"));
+    let tmp_path = dir.join(format!("{stem}.png.tmp"));
+
+    {
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp_path, &final_path)?;
+    Ok(final_path)
 }

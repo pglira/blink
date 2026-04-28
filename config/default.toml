@@ -1,4 +1,4 @@
-# blink — background screen recording daemon
+# blink — background screenshot daemon
 # Default configuration. Copy into ~/.config/blink/config.toml and edit.
 
 [capture]
@@ -8,28 +8,9 @@ interval_seconds = 60
 # "primary" captures only the primary monitor.
 monitors = "all"
 
-[video]
-# Codec: "h264" | "h265" | "av1". h264 is the safest for playback compatibility.
-codec = "h264"
-# Constant Rate Factor. Lower = better quality, larger file. 18–28 is typical.
-crf = 28
-# Roll over to a new segment file after this many minutes.
-segment_minutes = 60
-# Playback frame rate of the encoded video. Tune together with
-# capture.interval_seconds: each captured frame shows for 1/fps seconds,
-# so fps=2 with interval_seconds=60 yields a 120× timelapse.
-fps = 2
-# Start a new segment at local midnight so each MKV covers one calendar day.
-daily_split = true
-
-[staging]
-# JPEG quality 1–100. Screenshots sit here briefly before being encoded.
-jpeg_quality = 85
-# Set true to keep JPEGs after encoding (useful for the future OCR/journal feature).
-keep_after_encode = false
-
 [output]
-# When dir is empty, defaults to ~/Videos/blink
+# When dir is empty, defaults to ~/Pictures/blink
+# Files are saved as <dir>/YYYY/MM/YYYY_MM_DD_HH_MM_SS.png
 dir = ""
 
 [daemon]

@@ -1,14 +1,11 @@
 use std::sync::atomic::Ordering;
 
 use anyhow::{bail, Context as _, Result};
-use crossbeam_channel::unbounded;
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
 
 mod capture;
 mod config;
-mod encoder;
-mod staging;
 mod state;
 mod tray;
 
@@ -38,7 +35,7 @@ fn main() -> Result<()> {
 }
 
 fn print_help() {
-    println!("blink — background screen recording daemon");
+    println!("blink — background screenshot daemon");
     println!();
     println!("USAGE:");
     println!("  blink [run]       Start the daemon (default)");
@@ -51,10 +48,8 @@ fn print_help() {
 fn run() -> Result<()> {
     let cfg = config::Config::load().context("loading config")?;
     info!(
-        staging = %cfg.staging_dir().display(),
-        output  = %cfg.output_dir().display(),
+        output = %cfg.output_dir().display(),
         interval_s = cfg.capture.interval_seconds,
-        codec = %cfg.video.codec,
         "starting blink"
     );
 
@@ -73,35 +68,21 @@ fn run() -> Result<()> {
         .context("installing signal handler")?;
     }
 
-    let (tx, rx) = unbounded::<capture::Signal>();
-
-    let enc_handle = {
-        let cfg = cfg.clone();
-        let state = state.clone();
-        std::thread::Builder::new()
-            .name("blink-encoder".into())
-            .spawn(move || {
-                if let Err(e) = encoder::run(cfg, state, rx) {
-                    error!("encoder thread: {e:#}");
-                }
-            })?
-    };
-
     let cap_handle = {
         let cfg = cfg.clone();
         let state = state.clone();
         std::thread::Builder::new()
             .name("blink-capture".into())
             .spawn(move || {
-                if let Err(e) = capture::run(cfg, state, tx) {
+                if let Err(e) = capture::run(cfg, state) {
                     error!("capture thread: {e:#}");
                 }
             })?
     };
 
-    // Tray runs on the main thread; blocks in the GTK event loop until Quit.
-    // If GTK/tray can't initialise (e.g. no display), fall back to waiting on
-    // shutdown so the daemon still works headlessly.
+    // Tray runs on the main thread; blocks until Quit. If the tray can't
+    // initialise (e.g. no DBus session bus), fall back to waiting on shutdown
+    // so the daemon still works headlessly.
     if let Err(e) = tray::run(state.clone()) {
         error!("tray unavailable ({e:#}); running headless — send SIGINT to stop");
         while !state.shutting_down.load(Ordering::SeqCst) {
@@ -109,10 +90,9 @@ fn run() -> Result<()> {
         }
     }
 
-    // Tell the worker threads to wrap up, then join.
+    // Tell the worker thread to wrap up, then join.
     state.shutting_down.store(true, Ordering::SeqCst);
     let _ = cap_handle.join();
-    let _ = enc_handle.join();
 
     info!("blink stopped cleanly");
     Ok(())
