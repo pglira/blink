@@ -14,6 +14,10 @@ pub struct ViewerApp {
     /// Which month the calendar is currently displaying.
     pub view_year: i32,
     pub view_month: u32,
+    /// Last (day, shot index) the thumbnail strip auto-scrolled to. Used to
+    /// trigger `scroll_to_me` only on actual selection changes, so the user's
+    /// manual scrolling isn't fought every frame.
+    pub last_focused: Option<(NaiveDate, usize)>,
 }
 
 impl ViewerApp {
@@ -31,6 +35,7 @@ impl ViewerApp {
             selected_range: None,
             view_year: anchor.year(),
             view_month: anchor.month(),
+            last_focused: None,
         }
     }
 }
@@ -79,6 +84,7 @@ impl eframe::App for ViewerApp {
                     self.selected_day,
                     &mut self.selected_shot,
                     self.selected_range,
+                    &mut self.last_focused,
                 );
             });
 
